@@ -64,12 +64,13 @@ char deviceMAC[32]={'\0'};
 static int g_syncRetryThreadStarted = 0;
 
 //This flag is used to avoid sync notification retry when param notification is already in progress.
-static int g_syncNotifyInProgress = 0;
+int g_syncNotifyInProgress = 0;
 
 //This flag is used to avoid CMC check when CPE and cloud are in sync.
-static int g_checkSyncNotifyRetry = 0;
+int g_checkSyncNotifyRetry = 0;
 
 static char param_notify_string[256] = {0};
+
 #ifdef FEATURE_SUPPORT_WEBCONFIG
 char *g_systemReadyTime=NULL;
 #endif
@@ -246,13 +247,13 @@ void sendNotificationForFirmwareUpgrade();
 static WDMP_STATUS addOrUpdateFirmwareVerToConfigFile(char *value);
 static WDMP_STATUS processParamNotification(ParamNotify *paramNotify, unsigned int *cmc, char **cid);
 static WDMP_STATUS getCmcCidValues(unsigned int *cmc, char **cid);
-static WDMP_STATUS processParamNotificationRetry(unsigned int *cmc, char **cid);
 static void processConnectedClientNotification(NodeData *connectedNotify, char *deviceId, char **version, char ** nodeMacId, char **timeStamp, char **destination);
 static WDMP_STATUS processFactoryResetNotification(ParamNotify *paramNotify, unsigned int *cmc, char **cid, char **reason);
 static WDMP_STATUS processFirmwareUpgradeNotification(ParamNotify *paramNotify, unsigned int *cmc, char **cid);
 void processDeviceStatusNotification(int status);
 static void mapComponentStatusToGetReason(COMPONENT_STATUS status, char *reason);
 void getDeviceMac();
+static WDMP_STATUS processParamNotificationRetry(unsigned int *cmc, char **cid);
 static char* generate_trans_uuid();
 void SyncNotifyRetryTask();
 void *SyncNotifyRetry();
@@ -459,11 +460,11 @@ void *SyncNotifyRetry()
 			WalPrint("After Sending processNotification\n");
 			retry_count++;
 			if(retry_count >= 2)
-		        {
-		        	retry_count = 0;
-					g_checkSyncNotifyRetry = 0;
-			        WalInfo("retry reached max value, stop retrying\n");
-		        }
+			{
+				retry_count = 0;
+				g_checkSyncNotifyRetry = 0;
+				WalInfo("retry reached max value, stop retrying\n");
+			}
 
 		}
 		else
@@ -489,12 +490,14 @@ void ccspWebPaValueChangedCB(parameterSigStruct_t* val, int size, void* user_dat
 		WalError("Fatal: ccspWebPaValueChangedCB() notifyCbFn is NULL\n");
 		return;
 	}
+
 	g_syncNotifyInProgress = 1;
 	g_checkSyncNotifyRetry = 1;
-	WalInfo("set g_syncNotifyInProgress, g_checkSyncNotifyRetry to 1\n");		
+	WalInfo("set g_syncNotifyInProgress, g_checkSyncNotifyRetry to 1\n");	
+
 	paramNotify= (ParamNotify *) malloc(sizeof(ParamNotify));
 	paramNotify->paramName = strdup(val->parameterName);
-	paramNotify->oldValue= strdup(val->oldValue);
+	paramNotify->oldValue = strdup(val->oldValue);
 	paramNotify->newValue = strdup(val->newValue);
 	paramNotify->type = val->type;
 	paramNotify->changeSource = mapWriteID(val->writeID);
@@ -504,7 +507,6 @@ void ccspWebPaValueChangedCB(parameterSigStruct_t* val, int size, void* user_dat
 	notifyDataPtr->u.notify = paramNotify;
 
 	WalInfo("Notification Event from stack: Parameter Name: %s, Data Type: %d, Change Source: %d\n", paramNotify->paramName, paramNotify->type, paramNotify->changeSource);
-	WalInfo("paramNotify->oldValue %s, paramNotify->newValue %s\n", paramNotify->oldValue, paramNotify->newValue);
 
 	(*notifyCbFn)(notifyDataPtr);
 }
@@ -1329,8 +1331,8 @@ void processNotification(NotifyData *notifyData)
 	        		if (ret != WDMP_SUCCESS)
 	        		{
 	        			free(dest);
-                                        cJSON_Delete(notifyPayload);
-                                        freeNotifyMessage(notifyData);
+							cJSON_Delete(notifyPayload);
+							freeNotifyMessage(notifyData);
 	        			return;
 	        		}
 	        		cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
@@ -1355,6 +1357,7 @@ void processNotification(NotifyData *notifyData)
 				sync_transaction_uuid = generate_trans_uuid();						
 				cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");
 				WAL_FREE(sync_transaction_uuid);
+
 				//Added delay of 5s to fix wifi captive portal issue where sync notifications are sent before wifi updates the parameter values in device DB
 				WalInfo("Sleeping for 5 sec before sending SYNC_NOTIFICATION\n");
 				sleep(5);
@@ -1382,7 +1385,7 @@ void processNotification(NotifyData *notifyData)
 				cJSON_AddStringToObject(notifyPayload, "reboot_reason", (NULL != reboot_reason) ? reboot_reason : "NULL");
 				sync_transaction_uuid = generate_trans_uuid();
 				cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");
-                                WAL_FREE(cid);
+								WAL_FREE(cid);
                                 WAL_FREE(reboot_reason);
 				 WAL_FREE(sync_transaction_uuid);
 	        	}
@@ -1494,15 +1497,18 @@ void processNotification(NotifyData *notifyData)
 				OnboardLog("%s\n",dest);
 			}
 	        		break;
+					
 					case PARAM_NOTIFY_RETRY:
 					{
 						strcpy(dest, "event:SYNC_NOTIFICATION");
-					ret = processParamNotificationRetry(&cmc, &cid);
+						ret = processParamNotificationRetry(&cmc, &cid);
 						if (ret != WDMP_SUCCESS)
 						{
 							free(dest);
+							cJSON_Delete(notifyPayload);
+							freeNotifyMessage(notifyData);
 							return;
-						}					
+						}
 						cJSON_AddNumberToObject(notifyPayload, "cmc", cmc);
 						cJSON_AddStringToObject(notifyPayload, "cid", cid);
 						if((cmc == 768) && (strlen(param_notify_string) > 0))
@@ -1518,7 +1524,7 @@ void processNotification(NotifyData *notifyData)
 						sync_transaction_uuid = generate_trans_uuid();							
 						cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");
 						WAL_FREE(sync_transaction_uuid);												
-					WAL_FREE(cid);
+						WAL_FREE(cid);
 					}
 						break;
 	        	default:
@@ -1527,9 +1533,13 @@ void processNotification(NotifyData *notifyData)
 
 	        stringifiedNotifyPayload = cJSON_PrintUnformatted(notifyPayload);
 			if(notifyData->type == PARAM_NOTIFY_RETRY)
-			WalInfo("stringifiedNotifyPayload during sync notify retry is %s\n", stringifiedNotifyPayload);
-		else
-	        	WalPrint("stringifiedNotifyPayload %s\n", stringifiedNotifyPayload);
+			{
+				WalInfo("stringifiedNotifyPayload during sync notify retry is %s\n", stringifiedNotifyPayload);
+			}
+			else
+			{
+				WalPrint("stringifiedNotifyPayload %s\n", stringifiedNotifyPayload);
+			}
 
 	        if (stringifiedNotifyPayload != NULL
 	        		&& strlen(device_id) != 0)
@@ -1557,15 +1567,15 @@ static WDMP_STATUS processParamNotificationRetry(unsigned int *cmc, char **cid)
 	dbCMC = getParameterValue(PARAM_CMC);
 	if (NULL != dbCMC) 
 	{
-	        dbCID = getParameterValue(PARAM_CID);
-	        if (NULL == dbCID) 
+	    dbCID = getParameterValue(PARAM_CID);
+	    if (NULL == dbCID) 
 		{
 			WAL_FREE(dbCMC);
 			WalError("Error dbCID is NULL!\n");
 			return WDMP_FAILURE;
 		}
-	} 
-	else 
+	}
+	else
 	{
 	        WalError("Error dbCMC is NULL!\n");
 	        return WDMP_FAILURE;
@@ -1925,8 +1935,28 @@ static void freeNotifyMessage(NotifyData *notifyData)
 
 	if(notifyData->type == PARAM_NOTIFY)
 	{
-		WalPrint("Free notifyData->u.notify\n");
-		WAL_FREE(notifyData->u.notify);
+		if (notifyData->u.notify != NULL)
+		{
+			if (notifyData->u.notify->newValue != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->newValue);
+				WalPrint("Free notifyData->u.notify->newValue\n");
+			}
+
+			if (notifyData->u.notify->oldValue != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->oldValue);
+				WalPrint("Free notifyData->u.notify->oldValue\n");
+			}
+
+			if (notifyData->u.notify->paramName != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->paramName);
+				WalPrint("Free notifyData->u.notify->paramName\n");
+			}
+			WalPrint("Free notifyData->u.notify\n");
+			WAL_FREE(notifyData->u.notify);
+		}
 	}
 	else if(notifyData->type == TRANS_STATUS)
 	{
@@ -1967,6 +1997,31 @@ static void freeNotifyMessage(NotifyData *notifyData)
 	{
 		WalPrint("Free notifyData->u.device\n");
 		WAL_FREE(notifyData->u.device);
+	}
+	else if(notifyData->type == PARAM_NOTIFY_RETRY)
+	{
+		if (notifyData->u.notify != NULL)
+		{
+			if (notifyData->u.notify->newValue != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->newValue);
+				WalPrint("Free notifyData->u.notify->newValue\n");
+			}
+
+			if (notifyData->u.notify->oldValue != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->oldValue);
+				WalPrint("Free notifyData->u.notify->oldValue\n");
+			}
+
+			if (notifyData->u.notify->paramName != NULL)
+			{
+				WAL_FREE(notifyData->u.notify->paramName);
+				WalPrint("Free notifyData->u.notify->paramName\n");
+			}
+			WalPrint("Free notifyData->u.notify\n");
+			WAL_FREE(notifyData->u.notify);
+		}
 	}
 
 	WalPrint("Free notifyData\n");
