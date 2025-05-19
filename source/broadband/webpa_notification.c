@@ -419,6 +419,8 @@ void *SyncNotifyRetry()
 		if (rv == 0)
 		{
 			WalInfo("Received event signal for retrying sync notification.\n");
+			retry_count = 0;
+			continue;
 		} 
 		else if (rv == ETIMEDOUT) 
 		{
@@ -433,6 +435,7 @@ void *SyncNotifyRetry()
 		if(g_syncNotifyInProgress == 1)
 		{	
 			WalInfo("PARAM_NOTIFY is in progress\n");
+			retry_count = 0;
 			continue;
 		}
 
@@ -467,7 +470,7 @@ void *SyncNotifyRetry()
 			if(retry_count >= 2)
 		        {
 		        	retry_count = 0;
-					g_checkSyncNotifyRetry = 0;
+				g_checkSyncNotifyRetry = 0;
 			        WalInfo("retry reached max value, stop retrying\n");
 		        }
 
@@ -1332,7 +1335,7 @@ void processNotification(NotifyData *notifyData)
 	        		strcpy(dest, "event:SYNC_NOTIFICATION");
 
 	        		ret = processParamNotification(notifyData->u.notify, &cmc, &cid);
-					g_checkSyncNotifyIgnore = 1;
+				g_checkSyncNotifyIgnore = 1;
 	        		if (ret != WDMP_SUCCESS)
 	        		{
 	        			free(dest);
@@ -1344,11 +1347,9 @@ void processNotification(NotifyData *notifyData)
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				OnboardLog("%s/%d/%s\n",dest,cmc,cid);
                                 WAL_FREE(cid);
-				param_notify_string[0] = '\0';
+				memset(param_notify_string, 0, sizeof(param_notify_string));
 				if(cmc == 768)
 				{
-					//WalInfo("processNotification: Parameter Name: %s, Data Type: %d, Change Source: %d\n", notifyData->u.notify->paramName, notifyData->u.notify->type, notifyData->u.notify->changeSource);
-					//WalInfo("oldValue %s, newValue %s sync_transaction_uuid %s\n", notifyData->u.notify->oldValue, notifyData->u.notify->newValue,sync_transaction_uuid);
 					cJSON *parameter = cJSON_CreateObject();
 					cJSON_AddStringToObject(parameter, "name",(notifyData->u.notify->paramName != NULL) ? notifyData->u.notify->paramName : "unknown");
 					cJSON_AddStringToObject(parameter, "old_value", (notifyData->u.notify->oldValue != NULL) ? notifyData->u.notify->oldValue : "unknown");
@@ -1359,18 +1360,28 @@ void processNotification(NotifyData *notifyData)
 					WAL_FREE(param_string);
 					cJSON_AddItemToObject(notifyPayload, "parameter", parameter);
 
-					if(write_param_notify_into_file(param_notify_string) == 0)
+					if(write_sync_notify_into_file(param_notify_string) == 1)
 					{
 						WalError("Error while writing param_notify_string from file\n");
 					}					
 				}
-				sync_transaction_uuid = generate_trans_uuid();						
+				sync_transaction_uuid = generate_trans_uuid();
 				cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");
 				WAL_FREE(sync_transaction_uuid);
 
+			#if defined(_SCER11BEL_PRODUCT_REQ_)
+                               //XER10-1536: Added delay of 8s in XER10 platform to fix wifi captive portal issue where sync notifications are sent before wifi updates the parameter values in device DB
+				WalInfo("Sleeping for 8 sec before sending SYNC_NOTIFICATION\n");
+				sleep(8);
+			#else
 				//Added delay of 5s to fix wifi captive portal issue where sync notifications are sent before wifi updates the parameter values in device DB
 				WalInfo("Sleeping for 5 sec before sending SYNC_NOTIFICATION\n");
 				sleep(5);
+			#endif
+				//Signalling sync notification retry.
+				pthread_mutex_lock (&sync_mutex);
+				pthread_cond_signal(&sync_condition);
+				pthread_mutex_unlock(&sync_mutex);
 	        	}
 	        		break;
 
@@ -1394,8 +1405,9 @@ void processNotification(NotifyData *notifyData)
 	        		cJSON_AddStringToObject(notifyPayload, "cid", cid);
 				cJSON_AddStringToObject(notifyPayload, "reboot_reason", (NULL != reboot_reason) ? reboot_reason : "NULL");
 				sync_transaction_uuid = generate_trans_uuid();
-				cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");			                               WAL_FREE(cid);
-                                WAL_FREE(reboot_reason);
+				cJSON_AddStringToObject(notifyPayload, "sync_transaction_uuid", (sync_transaction_uuid != NULL) ? sync_transaction_uuid : "unknown");
+				WAL_FREE(cid);
+				WAL_FREE(reboot_reason);
 				WAL_FREE(sync_transaction_uuid);
 	        	}
 	        		break;
@@ -1524,7 +1536,7 @@ void processNotification(NotifyData *notifyData)
 				{
 					if(strlen(param_notify_string) == 0)
 					{
-						if(read_param_notify_from_file() == 0)
+						if(read_sync_notify_from_file() == 1)
 						{
 							WalError("Error while reading param_notify_retry_string from file\n");
 							return;
@@ -1618,8 +1630,12 @@ static WDMP_STATUS processParamNotification(ParamNotify *paramNotify,
 				strCMC, oldCMC, newCMC);
 
 		WAL_FREE(strCMC);
-		if (newCMC != oldCMC)
+		if ((newCMC != oldCMC) || (g_checkSyncNotifyIgnore == 0))
 		{
+			if((g_checkSyncNotifyIgnore == 0) && (newCMC == oldCMC))
+			{
+				WalInfo("No change in CMC value,This is first notification and din't ignore value change event\n");
+			}			
 			WalPrint("NewCMC and OldCMC not equal.\n");
 			sprintf(strNewCMC, "%d", newCMC);
 			status = setParameterValue(PARAM_CMC, strNewCMC, WDMP_UINT);
@@ -1648,11 +1664,6 @@ static WDMP_STATUS processParamNotification(ParamNotify *paramNotify,
 		}
 		else
 		{
-			if(g_checkSyncNotifyIgnore == 0)
-			{
-				WalInfo("No change in CMC value, First notification din't ignore value change event\n");
-				return WDMP_SUCCESS;
-			}
 			WalInfo("No change in CMC value, ignoring value change event\n");
 		}
 	}
@@ -2129,16 +2140,6 @@ WDMP_STATUS validate_webpa_notification_data(char *notify_param_name, char *writ
 	return WDMP_SUCCESS;
 }
 
-pthread_cond_t *get_global_sync_condition(void)
-{
-    return &sync_condition;
-}
-
-pthread_mutex_t *get_global_sync_mutex(void)
-{
-    return &sync_mutex;
-}
-
 char* generate_trans_uuid()
 {
 	char *transID = NULL;
@@ -2155,62 +2156,46 @@ char* generate_trans_uuid()
 	return transID;
 }
 
-int read_param_notify_from_file()
+int read_sync_notify_from_file()
 {
-    char err_buf[256];  // To store strerror_r error messages
-	WalInfo("parameter payload reading from backup file during sync notify retry");
+	WalInfo("parameter payload reading from backup file during sync notify retry\n");
     // Open the file in read mode
     FILE *fp = fopen(PARAM_BACKUP_FILE, "r");
     if (fp == NULL) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error opening file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
+        WalError("Error opening file '%s'\n", PARAM_BACKUP_FILE);
         return 1;
     }
 
     // Read the file line by line
     fgets(param_notify_string, sizeof(param_notify_string), fp);
 
-    // Check for read error
-    if (ferror(fp)) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error reading file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
-        fclose(fp);
-        return 1;
-    }
-
     // Close the file
     if (fclose(fp) != 0) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error closing file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
+        WalError("Error closing file '%s'\n", PARAM_BACKUP_FILE);
         return 1;
     }
 
     return 0;
 }
 
-int write_param_notify_into_file(char *buff)
+int write_sync_notify_into_file(char *buff)
 {
-    char err_buf[256];  // Buffer to store strerror_r result	
-
     FILE *fp = fopen(PARAM_BACKUP_FILE, "w");
     if (fp == NULL) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error opening file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
+        WalError("Error opening file '%s'\n", PARAM_BACKUP_FILE);
         return 1;
     }
 
     // Write to the file
     if (fprintf(fp, "%s", buff) < 0) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error writing to file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
+        WalError("Error writing to file '%s'\n", PARAM_BACKUP_FILE);
         fclose(fp);
         return 1;
     }
 
     // Close the file
     if (fclose(fp) != 0) {
-        strerror_r(errno, err_buf, sizeof(err_buf));
-        WalError("Error closing file '%s': %s\n", PARAM_BACKUP_FILE, err_buf);
+        WalError("Error closing file '%s'\n", PARAM_BACKUP_FILE);
         return 1;
     }
 
