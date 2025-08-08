@@ -59,6 +59,7 @@ int main()
 	if(isRbusEnabled())
 	{
 	        webpaRbusInit(pComponentName);
+			regWebPaDataModel();
         }
 	ret = waitForOperationalReadyCondition();
 	libpd_client_mgr();
