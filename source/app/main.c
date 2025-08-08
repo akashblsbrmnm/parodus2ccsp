@@ -8,6 +8,7 @@
 #include "stdlib.h"
 #include "signal.h"
 #include "webpa_adapter.h"
+#include "webpa_notification.h"
 #include "libpd.h"
 #include "webpa_rbus.h"
 #ifdef FEATURE_SUPPORT_WEBCONFIG
@@ -59,6 +60,8 @@ int main()
 	if(isRbusEnabled())
 	{
 	        webpaRbusInit(pComponentName);
+			// Register Rbus method handler and webpa tr181
+			regWebPaDataModel();
         }
 	ret = waitForOperationalReadyCondition();
 	libpd_client_mgr();

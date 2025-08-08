@@ -2132,6 +2132,7 @@ int main(void)
         cmocka_unit_test(test_syncNotifyRetry_Skip_CMC_Check),
         cmocka_unit_test(test_syncNotifyRetry_dbCMC_NULL),
         cmocka_unit_test(test_syncNotifyRetry_Signalled)
+        // cmocka_unit_test(test_updateGlobalNotifyList_Update_List_Only)
     };
 
     numLoops = 1;
