@@ -22,6 +22,7 @@
     #define WEBPA_CFG_FILE                      "/tmp/webpa_cfg.json"
 #endif
 #define SYNC_NOTIFY_PARAM_BACKUP_FILE "/tmp/webpa_sync_notification.json"
+#define NOTIFY_PARAM_FILE "/nvram/webpa_notify_param"
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
 /*----------------------------------------------------------------------------*/
@@ -99,6 +100,15 @@ typedef struct
  */
 typedef void (*notifyCB)(NotifyData *notifyDataPtr);
 
+/**
+ * @brief globalNotifyList update modes
+ */
+typedef enum
+{
+    UPDATE_LIST_ONLY = 0,
+    UPDATE_LIST_AND_WRITE_FILE
+} NotifyListUpdate_mode;
+
 /*----------------------------------------------------------------------------*/
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
@@ -142,3 +152,7 @@ void FR_CloudSyncCheck();
 
 int read_sync_notify_from_file();
 int write_sync_notify_into_file(char *buff);
+
+char** getGlobalNotifyParams(void);
+int setGlobalNotifyParams(char** cloudNotifyList, int cloudCount, NotifyListUpdate_mode mode);
+
