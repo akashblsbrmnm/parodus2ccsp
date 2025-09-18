@@ -11,10 +11,9 @@ static rbusHandle_t rbus_handle;
 static bool isRbus = false;
 
 rbusDataElement_t dataElements[2] = {
-            {WEBPA_NOTIFY_PARAM, RBUS_ELEMENT_TYPE_PROPERTY, {NotifyParamGetHandler, NULL, NULL, NULL, NULL, NULL}},
-            {WEBPA_SUBSCRIBE_LIST, RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, SubscribeNotifyParamMethodHandler}} /* API to subscribe 
-                                                                                                            to notify parameters from components */
-    };
+    {WEBPA_NOTIFY_PARAM, RBUS_ELEMENT_TYPE_PROPERTY, {NotifyParamGetHandler, NULL, NULL, NULL, NULL, NULL}},
+    {WEBPA_SUBSCRIBE_LIST, RBUS_ELEMENT_TYPE_METHOD, {NULL, NULL, NULL, NULL, NULL, SubscribeNotifyParamMethodHandler}}
+};
 
 bool isRbusEnabled()
 {
@@ -133,7 +132,7 @@ rbusError_t clearTraceContext()
 }
 
 /**
- * Register data elements for dataModel implementation using rbus.
+ * Register data elements for data model and methods implementation using rbus.
  */
 int regWebPaDataModel()
 {
@@ -193,7 +192,7 @@ rbusError_t NotifyParamGetHandler(rbusHandle_t handle, rbusProperty_t property, 
         return RBUS_ERROR_ELEMENT_DOES_NOT_EXIST;
     }
 
-    const char * const *params = getGlobalNotifyParams();
+    char** params = getGlobalNotifyParams();
     if(!params)
         return RBUS_ERROR_BUS_ERROR;
 
@@ -240,25 +239,31 @@ static void eventReceiveHandler(
     (void)rbus_handle;
     (void)subscription;
 
-    if (!event || !event->data)
+    rbusValue_t newValue, oldValue, writeId;
+    char newValueStr[256] = "NULL";
+    char oldValueStr[256] = "NULL";
+    char writeIdStr[256]  = "NULL";
+
+    if (!event || !event->data || !event->name)
     {
         WalError("Received null event or event data\n");
         return;
     }
 
-    rbusValue_t newValue = rbusObject_GetValue(event->data, "value");
-    rbusValue_t oldValue = rbusObject_GetValue(event->data, "oldValue");
-    rbusValue_t writeId = rbusObject_GetValue(event->data, "by");
+    WalInfo("Consumer received Value Change event for param %s\n", event->name ? event->name : "NULL");
 
-    WalInfo("Consumer received ValueChange event for param %s\n", (event && event->name) ? event->name : "NULL");
+    newValue = rbusObject_GetValue(event->data, "value");
+    oldValue = rbusObject_GetValue(event->data, "oldValue");
+    writeId = rbusObject_GetValue(event->data, "by");
 
-    const char* newValueStr = newValue ? rbusValue_GetString(newValue, NULL) : NULL;
-    const char* oldValueStr = oldValue ? rbusValue_GetString(oldValue, NULL) : NULL;
-    const char* writeIdStr =  writeId  ? rbusValue_GetString(writeId, NULL)  : NULL;
-    WalInfo("New Value: %s, Old Value: %s, writeID: %s\n",
-        newValueStr ? newValueStr : "NULL",
-        oldValueStr ? oldValueStr : "NULL",
-        writeIdStr ? writeIdStr : "NULL");
+    if(newValue)
+        rbusValue_ToString(newValue, newValueStr, sizeof(newValueStr));
+    if(oldValue)
+        rbusValue_ToString(oldValue, oldValueStr, sizeof(oldValueStr));
+    if(writeId)
+        rbusValue_ToString(writeId, writeIdStr, sizeof(writeIdStr));
+
+    WalInfo("New Value: %s, Old Value: %s, writeID: %s", newValueStr ? newValueStr : "NULL", oldValueStr ? oldValueStr : "NULL", writeIdStr ? writeIdStr : "NULL");
     return;
 }
 
@@ -336,11 +341,14 @@ rbusError_t SubscribeNotifyParamMethodHandler(
 
     WalInfo("SubscribeNotifyParamMethodHandler invoked\n");
 
-    rbusProperty_t props = rbusObject_GetProperties(inParams);
-    int count = props ? rbusProperty_Count(props) : 0;
+    char* msgBuf = NULL;
     rbusValue_t message, statusCode;
     rbusValue_Init(&message);
     rbusValue_Init(&statusCode);
+
+/* Extract inParams */
+    rbusProperty_t props = rbusObject_GetProperties(inParams);
+    int count = props ? rbusProperty_Count(props) : 0;
 
     if (count == 0)
     {
@@ -388,12 +396,15 @@ rbusError_t SubscribeNotifyParamMethodHandler(
         goto set_response_and_return;
     }
 
+/* Subscribe validated parameters to rbus */
     char** succeededParams = NULL;
     char** failedParams = NULL;
     int successCount = 0, failureCount = 0;
 
     rbusError_t err = subscribeToNotifyParams(dynamicNotifyParams, validCount, &succeededParams, &successCount, &failedParams, &failureCount);
-
+    free(dynamicNotifyParams);
+    
+    
     if(err != RBUS_ERROR_SUCCESS)
     {
         rbusValue_SetString(message, "Subscription failed");
@@ -401,48 +412,73 @@ rbusError_t SubscribeNotifyParamMethodHandler(
         goto set_response_and_return;
     }
 
-    char successBuf[1024] = {0};
-    char failedBuf[1024]  = {0};
+/* Build comma-separated success/failure lists */
+    size_t successBufLen = successCount ? successCount * 64 : 1;
+    size_t failedBufLen  = failureCount ? failureCount * 64 : 1;
+    char* successBuf = calloc(successBufLen, 1);
+    char* failedBuf  = calloc(failedBufLen, 1);
+    if (!successBuf || !failedBuf)
+    {
+        WalError("Failed to allocate successBuf or failedBuf");
+        rbusValue_SetString(message, "Memory allocation failed");
+        rbusValue_SetInt32(statusCode, RBUS_ERROR_OUT_OF_RESOURCES);
+        goto set_response_and_return;
+    }
     size_t successLen = 0, failedLen = 0;
 
+/* Buffer for subscribed parameters */
     for (int i = 0; i < successCount; i++)
     {
-        size_t rem = sizeof(successBuf) - successLen;
+        size_t rem = successBufLen - successLen;
         if (rem == 0) break;
         int wrote = snprintf(successBuf + successLen, rem, "%s%s",
                             (i > 0) ? ", " : "", succeededParams[i]);
         if (wrote < 0) break;
-        if ((size_t)wrote >= rem) { successLen = sizeof(successBuf) - 1; break; }
+        if ((size_t)wrote >= rem) { successLen = successBufLen - 1; break; }
         successLen += (size_t)wrote;
     }
-
+/* Buffer for subscribe failed parameters */
     for (int i = 0; i < failureCount; i++)
     {
-        size_t rem = sizeof(failedBuf) - failedLen;
+        size_t rem = failedBufLen - failedLen;
         if (rem == 0) break;
         int wrote = snprintf(failedBuf + failedLen, rem, "%s%s",
                             (i > 0) ? ", " : "", failedParams[i]);
         if (wrote < 0) break;
-        if ((size_t)wrote >= rem) { failedLen = sizeof(failedBuf) - 1; break; }
+        if ((size_t)wrote >= rem) { failedLen = failedBufLen - 1; break; }
         failedLen += (size_t)wrote;
     }
+/* Format final response message */
+    size_t msgBuf_len = strlen(successBuf) + strlen(failedBuf) + 256;
+    if (msgBuf_len == 0) msgBuf_len = 256;
+    
+    msgBuf = malloc(msgBuf_len);
+    if (!msgBuf) {
+        WalError("Failed to allocate msgBuf");
+        rbusValue_SetString(message, "Memory allocation failed");
+        rbusValue_SetInt32(statusCode, RBUS_ERROR_OUT_OF_RESOURCES);
+        goto set_response_and_return;
+    }
 
-    char msgBuf[2048] = {0};
     if (failureCount == 0)
-        snprintf(msgBuf, sizeof(msgBuf),
-                 "All %d subscription requests initiated successfully: %s",
-                 successCount, successBuf);
+        snprintf(msgBuf, msgBuf_len,
+                "All %d subscription requests initiated successfully: %s",
+                successCount, successBuf);
     else if (successCount == 0)
-        snprintf(msgBuf, sizeof(msgBuf),
-                 "All %d subscription requests failed: %s",
-                 failureCount, failedBuf);
+        snprintf(msgBuf, msgBuf_len,
+                "All %d subscription requests failed: %s",
+                failureCount, failedBuf);
     else
-        snprintf(msgBuf, sizeof(msgBuf),
-                 "Partial success: %d succeeded [%s], %d failed [%s]",
-                 successCount, successBuf, failureCount, failedBuf);
+        snprintf(msgBuf, msgBuf_len,
+                "Partial success: %d succeeded [%s], %d failed [%s]",
+                successCount, successBuf, failureCount, failedBuf);
 
+/* Set verbose output message to rbus outParams */
     rbusValue_SetString(message, msgBuf);
     rbusValue_SetInt32(statusCode, failureCount == 0 ? 0 : RBUS_ERROR_BUS_ERROR);
+
+    WalInfo("SubscribeNotifyParamMethodHandler completed: %s", msgBuf);
+    free(msgBuf); msgBuf = NULL;
 
 set_response_and_return:
     rbusObject_SetValue(outParams, "message", message);
@@ -451,13 +487,19 @@ set_response_and_return:
     if (message) rbusValue_Release(message);
     if (statusCode) rbusValue_Release(statusCode);
 
-    for (int i = 0; i < successCount; i++)
-        free(succeededParams[i]);
-    for (int i = 0; i < failureCount; i++)
-        free(failedParams[i]);
+    if (succeededParams)
+    {
+        for (int i = 0; i < successCount; i++) free(succeededParams[i]);
+        free(succeededParams);
+    }
+    if (failedParams)
+    {
+        for (int i = 0; i < failureCount; i++) free(failedParams[i]);
+        free(failedParams);
+    }
 
-    free(succeededParams);
-    free(failedParams);
+    if (successBuf) free(successBuf);
+    if (failedBuf) free(failedBuf);
 
     WalInfo("SubscribeNotifyParamMethodHandler completed: %s", msgBuf);
     return RBUS_ERROR_SUCCESS;

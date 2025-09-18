@@ -268,7 +268,7 @@ void SyncNotifyRetryTask();
 void *SyncNotifyRetry();
 static int getParamsFromFile(char*** outList);
 static void freeGlobalNotifyList(void);
-static void subscribeRbusNotification();
+static void subscribeInitialNorifyParameters();
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
@@ -1005,7 +1005,7 @@ static void *notifyTask(void *status)
 	sendNotificationForFirmwareUpgrade();
 	setInitialNotify();
 	handleNotificationEvents();
-	subscribeRbusNotification();
+	subscribeInitialNorifyParameters();
 	WAL_FREE(status);
 	WalPrint("notifyTask ended!\n");
 	return NULL;
@@ -2452,8 +2452,7 @@ char** getGlobalNotifyParams(void)
     return list;
 }
 
-
-static void subscribeRbusNotification()
+static void subscribeInitialNorifyParameters()
 {
     const char **staticNotifyParameters = NULL;
     int notifyListSize = 0;
@@ -2465,13 +2464,13 @@ static void subscribeRbusNotification()
         return;
     }
 
+    // Prepare output for subscription results
     char **succeeded = NULL;
     char **failed = NULL;
     int successCount = 0, failureCount = 0;
 
     rbusError_t ret = subscribeToNotifyParams(
-        staticNotifyParameters,
-        notifyListSize,
+        staticNotifyParameters, notifyListSize,
         &succeeded, &successCount,
         &failed, &failureCount);
 
@@ -2483,8 +2482,6 @@ static void subscribeRbusNotification()
     {
         WalInfo("subscription completed: %d succeeded, %d failed", successCount, failureCount);
     }
-
-	// Need to implement retry lists too :p
 
     for (int i = 0; i < successCount; i++) free(succeeded[i]);
     for (int i = 0; i < failureCount; i++) free(failed[i]);
