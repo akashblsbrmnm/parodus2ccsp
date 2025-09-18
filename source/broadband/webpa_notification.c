@@ -272,6 +272,7 @@ static void subscribeRbusNotification();
 /*----------------------------------------------------------------------------*/
 /*                             External Functions                             */
 /*----------------------------------------------------------------------------*/
+extern int getConnCloudStatus(char *device_mac);
 
 
 void initNotifyTask(int status)
@@ -650,21 +651,21 @@ void loadCfgFile()
 	fseek(fp, 0, SEEK_END);
 	ch_count = ftell(fp);
 	if (ch_count == (int)-1)
-    		{
-        		WalError("fread failed.\n");
-			fclose(fp);
-        		return WDMP_FAILURE;
-    		}
+    {
+        WalError("fread failed.\n");
+        fclose(fp);
+        return;
+    }
 	fseek(fp, 0, SEEK_SET);
 	cfg_file_content = (char *) malloc(sizeof(char) * (ch_count + 1));
 	sz = fread(cfg_file_content, 1, ch_count,fp);
-		if (sz == 0 && ferror(fp)) 
-		{	
-			fclose(fp);
-			WalError("fread failed.\n");
-			WAL_FREE(cfg_file_content);
-			return WDMP_FAILURE;
-		}
+    if (sz == 0 && ferror(fp))
+    {
+        fclose(fp);
+        WalError("fread failed.\n");
+        WAL_FREE(cfg_file_content);
+        return;
+    }
 	cfg_file_content[ch_count] ='\0';
 	WalPrint("cfg_file_content : \n%s\n",cfg_file_content);
 	fclose(fp);
@@ -719,6 +720,8 @@ static void getNotifyParamList(const char ***paramList, int *size)
     int removeFlag = 0, count = 0, i = 0, fpRemoveFlag = 0;
     count = sizeof(staticNotifyParameters)/sizeof(staticNotifyParameters[0]);
 #ifdef RDKB_BUILD
+    extern int syscfg_init (void);
+    extern int syscfg_get (const char *ns, const char *name, char *out_val, int outbufsz);
     char *fpEnable = NULL;
     fpEnable = getParameterValue(FP_PARAM);
     if(fpEnable != NULL && strncmp(fpEnable, "true", strlen("true")) == 0)
@@ -945,6 +948,7 @@ void getDeviceMac()
         {	    
             backoffRetryTime = (int) pow(2, c) -1;
 #ifdef RDKB_BUILD
+            extern int s_sysevent_connect (token_t *out_se_token);
             token_t  token;
             int fd = s_sysevent_connect(&token);
             if(WDMP_SUCCESS == check_ethernet_wan_status() && sysevent_get(fd, token, "eth_wan_mac", deviceMACValue, sizeof(deviceMACValue)) == 0 && deviceMACValue[0] != '\0')
