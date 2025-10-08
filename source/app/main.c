@@ -61,6 +61,8 @@ int main()
 	if(isRbusEnabled())
 	{
 	        webpaRbusInit(pComponentName);
+			// Register Rbus method handler and webpa tr181
+			regWebpaDataModel();
         }
 	ret = waitForOperationalReadyCondition();
 	libpd_client_mgr();

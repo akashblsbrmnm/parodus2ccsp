@@ -7,6 +7,7 @@
 #include "plugin_main_apis.h"
 #include "webpa_internal.h"
 #include "webpa_notification.h"
+#include "webpa_eventing.h"
 
 #define WEBPA_PARAM_VERSION                 "Device.X_RDKCENTRAL-COM_Webpa.Version"
 #define WEBPA_PARAM_PROTOCOL_VERSION        "Device.DeviceInfo.Webpa.X_COMCAST-COM_SyncProtocolVersion"
@@ -530,6 +531,29 @@ int getWebpaParameterValues(char **parameterNames, int paramCount, int *val_size
                                 paramVal[k]->type = ccsp_string;
                                 k++;
                             }
+                            else if(strcmp(parameterNames[i], WEBPA_NOTIFY_SUBSCRIPTION_PARAM) == 0)
+                            {
+                                paramVal[k]->parameterName = strndup(WEBPA_NOTIFY_SUBSCRIPTION_PARAM, MAX_PARAMETERNAME_LEN);
+                                char *paramList = NULL;
+                                paramList = CreateJsonFromGlobalNotifyList();
+                                if(paramList != NULL && strlen(paramList) > 0)
+                                {
+                                    paramVal[k]->parameterValue = strdup(paramList);
+                                    if (paramVal[k]->parameterValue == NULL)
+                                    {
+                                        WalError("Failed to allocate memory for parameterValue for NotifyParameters request\n");
+                                    }
+                                    WalPrint("Global notify param list is %s\n",paramVal[k]->parameterValue);
+                                    paramVal[k]->type = ccsp_none;
+                                }
+                                else
+                                {
+                                    snprintf(paramVal[k]->parameterValue,sizeof(char)*MAX_PARAMETERVALUE_LEN,"%s","Global param list is empty");
+                                    WalError("Global param list is empty\n");
+                                    paramVal[k]->type = ccsp_string;
+                                }
+                                k++;
+                            }
                             else
                             {
                                 WAL_FREE(paramVal[k]);
@@ -540,7 +564,7 @@ int getWebpaParameterValues(char **parameterNames, int paramCount, int *val_size
                         {
                             if(strcmp(parameterNames[i],webpaObjects[j]) == 0)
                             {
-                                localCount= localCount+2;
+                                localCount= localCount+3;
                                 paramVal = (parameterValStruct_t **) realloc(paramVal, sizeof(parameterValStruct_t *)*localCount);
                                 paramVal[k] = (parameterValStruct_t *) malloc(sizeof(parameterValStruct_t));
                                 paramVal[k]->parameterName = strndup(PARAM_CMC, MAX_PARAMETERNAME_LEN);
@@ -572,6 +596,28 @@ int getWebpaParameterValues(char **parameterNames, int paramCount, int *val_size
 				}
                                 paramVal[k]->parameterValue = strndup(pWebpaCfg->X_COMCAST_COM_SyncProtocolVersion,MAX_PARAMETERVALUE_LEN);
                                 paramVal[k]->type = ccsp_string;
+                                k++;
+
+                                paramVal[k] = (parameterValStruct_t *) malloc(sizeof(parameterValStruct_t));
+                                paramVal[k]->parameterName = strndup(WEBPA_NOTIFY_SUBSCRIPTION_PARAM, MAX_PARAMETERNAME_LEN);
+                                char *paramList = NULL;
+                                paramList = CreateJsonFromGlobalNotifyList();
+                                if(paramList != NULL && strlen(paramList) > 0)
+                                {
+                                    paramVal[k]->parameterValue = strdup(paramList);
+                                    if (paramVal[k]->parameterValue == NULL)
+                                    {
+                                        WalError("Failed to allocate memory for parameterValue for NotifyParameters request\n");
+                                    }
+                                    WalPrint("Global notify param list is %s\n",paramVal[k]->parameterValue);
+                                    paramVal[k]->type = ccsp_none;
+                                }
+                                else
+                                {
+                                    snprintf(paramVal[k]->parameterValue,sizeof(char)*MAX_PARAMETERVALUE_LEN,"%s","Global param list is empty");
+                                    WalError("Global param list is empty\n");
+                                    paramVal[k]->type = ccsp_string;
+                                }
                                 k++;
                             }
                             else

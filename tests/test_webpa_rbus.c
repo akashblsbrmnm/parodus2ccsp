@@ -1,7 +1,9 @@
 #include<stdio.h>
 #include <CUnit/Basic.h>
+#include <rbus/rbus_property.h>
 
 #include "../source/include/webpa_rbus.h"
+#include "../source/broadband/include/webpa_eventing.h"
 rbusHandle_t handle;
 
 // Test case for isRbusEnabled
@@ -99,6 +101,74 @@ void test_getTraceContext_empty()
     CU_ASSERT_EQUAL(1,rc);
 }
 
+void test_NotifySubscriptionListGetHandler_unexpected_param(void)
+{
+    WalInfo("\n**************************************************\n");
+    rbusError_t rc = RBUS_ERROR_BUS_ERROR;
+    rbusProperty_t mockProp = NULL;
+
+    rbusProperty_Init(&mockProp, "Device.Wrong.Parameter", NULL);
+
+    rc = NotifySubscriptionListGetHandler(NULL, mockProp, NULL);
+    CU_ASSERT_EQUAL(rc, RBUS_ERROR_ELEMENT_DOES_NOT_EXIST);
+
+    rbusProperty_Release(mockProp);
+}
+
+void test_NotifySubscriptionListGetHandler_NO_DATA()
+{
+    WalInfo("\n**************************************************\n");
+    rbusError_t rc = RBUS_ERROR_BUS_ERROR;
+    rbusProperty_t mockProp = NULL;
+    clearGlobalNotifyList();
+
+    rbusProperty_Init(&mockProp, WEBPA_NOTIFY_SUBSCRIPTION_PARAM, NULL);
+
+    rc = NotifySubscriptionListGetHandler(NULL, mockProp, NULL);
+    CU_ASSERT_EQUAL(rc, RBUS_ERROR_SUCCESS);
+
+    const char *jsonStr = rbusValue_GetString(rbusProperty_GetValue(mockProp), NULL);
+    CU_ASSERT_STRING_EQUAL(jsonStr, "[]");
+
+    rbusProperty_Release(mockProp);
+}
+
+void test_NotifySubscriptionListGetHandler_one_param_success(void)
+{
+    clearGlobalNotifyList();
+
+    // Add one parameter
+    addParamToGlobalList("Device.Param.One", true, true);
+
+    rbusProperty_t mockProp = NULL;
+    rbusProperty_Init(&mockProp, WEBPA_NOTIFY_SUBSCRIPTION_PARAM, NULL);
+
+    rbusError_t rc = NotifySubscriptionListGetHandler(NULL, mockProp, NULL);
+    CU_ASSERT_EQUAL(rc, RBUS_ERROR_SUCCESS);
+
+    rbusValue_t val = rbusProperty_GetValue(mockProp);
+    CU_ASSERT_PTR_NOT_NULL(val);
+
+    const char *jsonStr = rbusValue_GetString(val, NULL);
+    CU_ASSERT_PTR_NOT_NULL(jsonStr);
+
+    cJSON *root = cJSON_Parse(jsonStr);
+    CU_ASSERT_PTR_NOT_NULL(root);
+    CU_ASSERT_TRUE(cJSON_IsArray(root));
+    CU_ASSERT_EQUAL(cJSON_GetArraySize(root), 1);
+
+    cJSON *item = cJSON_GetArrayItem(root, 0);
+    CU_ASSERT_PTR_NOT_NULL(item);
+
+    CU_ASSERT_STRING_EQUAL(cJSON_GetObjectItem(item, "ParamName")->valuestring, "Device.Param.One");
+    CU_ASSERT_STRING_EQUAL(cJSON_GetObjectItem(item, "Type")->valuestring, "Static");
+    CU_ASSERT_STRING_EQUAL(cJSON_GetObjectItem(item, "Status")->valuestring, "ON");
+
+    cJSON_Delete(root);
+    rbusProperty_Release(mockProp);
+    clearGlobalNotifyList();
+}
+
 void add_suites( CU_pSuite *suite )
 {
 	*suite = CU_add_suite( "tests", NULL, NULL );
@@ -110,6 +180,9 @@ void add_suites( CU_pSuite *suite )
     CU_add_test( *suite, "test setTraceContext_header_empty", test_setTraceContext_header_empty);
     CU_add_test( *suite, "test getTraceContext_success", test_getTraceContext_success);
     CU_add_test( *suite, "test getTraceContext_empty", test_getTraceContext_empty);
+    CU_add_test( *suite, "test NotifySubscriptionListGetHandler_unexpected_param", test_NotifySubscriptionListGetHandler_unexpected_param);
+    CU_add_test( *suite, "test NotifySubscriptionListGetHandler_NO_DATA", test_NotifySubscriptionListGetHandler_NO_DATA);
+    CU_add_test( *suite, "test NotifySubscriptionListGetHandler_one_param_success", test_NotifySubscriptionListGetHandler_one_param_success);
 }
 
 
