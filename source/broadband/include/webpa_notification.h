@@ -5,6 +5,8 @@
  *
  * Copyright (c) 2015  Comcast
  */
+#ifndef _WEBPA_NOTIFICATION_H_
+#define _WEBPA_NOTIFICATION_H_
 #include <cJSON.h>
 #include "stdlib.h"
 #include "wdmp-c.h"
@@ -22,6 +24,7 @@
     #define WEBPA_CFG_FILE                      "/tmp/webpa_cfg.json"
 #endif
 #define SYNC_NOTIFY_PARAM_BACKUP_FILE "/tmp/webpa_sync_notification.json"
+#define NOTIFY_PARAM_FILE "/nvram/webpa_dynamic_notify_params.txt"
 /*----------------------------------------------------------------------------*/
 /*                               Data Structures                              */
 /*----------------------------------------------------------------------------*/
@@ -99,6 +102,15 @@ typedef struct
  */
 typedef void (*notifyCB)(NotifyData *notifyDataPtr);
 
+typedef enum {
+    NOTIFY_SUBSCRIPTION_SUCCESS                 =  200,
+    NOTIFY_SUBSCRIPTION_FAILURE                 =  500,
+    NOTIFY_SUBSCRIPTION_INVALID_INPUT           =  400,
+    NOTIFY_SUBSCRIPTION_ALREADY_EXISTS          =  409,
+    NOTIFY_SUBSCRIPTION_BOOTUP_IN_PROGRESS      =  503,
+    NOTIFY_SUBSCRIPTION_MULTI_STATUS            =  207
+} NOTIFY_SUBSCRIPTION_STATUS_CODE;
+
 /*----------------------------------------------------------------------------*/
 /*                             Function Prototypes                            */
 /*----------------------------------------------------------------------------*/
@@ -142,3 +154,12 @@ void FR_CloudSyncCheck();
 
 int read_sync_notify_from_file();
 int write_sync_notify_into_file(char *buff);
+
+void addParamToGlobalList(const char* paramName, bool paramType, bool paramSubscriptionStatus);
+g_NotifyParam* searchParaminGlobalList(const char *paramName);
+char* CreateJsonFromGlobalNotifyList();
+char* readDynamicParamsFromDBFile();
+int writeDynamicParamToDBFile(const char *param);
+void setBootupNotifyInProgress(bool value);
+bool getBootupNotifyInProgress();
+#endif
